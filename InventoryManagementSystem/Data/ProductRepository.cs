@@ -34,19 +34,26 @@ namespace InventoryManagementSystem.Data
         /// </summary>
         public List<Product> GetAll()
         {
-            var list = new List<Product>();
-            const string sql = "SELECT Id, Name, Price, Quantity, MinStock FROM Products ORDER BY Id ASC;";
-
-            using var connection = CreateConnection();
-            using var command = new SqliteCommand(sql, connection);
-            using var reader = command.ExecuteReader();
-
-            while (reader.Read())
+            try
             {
-                list.Add(ReadProduct(reader));
-            }
+                var list = new List<Product>();
+                const string sql = "SELECT Id, Name, Price, Quantity, MinStock FROM Products ORDER BY Id ASC;";
 
-            return list;
+                using var connection = CreateConnection();
+                using var command = new SqliteCommand(sql, connection);
+                using var reader = command.ExecuteReader();
+
+                while (reader.Read())
+                {
+                    list.Add(ReadProduct(reader));
+                }
+
+                return list;
+            }
+            catch (Exception ex)
+            {
+                throw new RepositoryException("Inventory Catalog", "Query All Products", ex.Message, ex);
+            }
         }
 
         /// <summary>
@@ -54,19 +61,26 @@ namespace InventoryManagementSystem.Data
         /// </summary>
         public Product? GetById(int id)
         {
-            const string sql = "SELECT Id, Name, Price, Quantity, MinStock FROM Products WHERE Id = @Id;";
-
-            using var connection = CreateConnection();
-            using var command = new SqliteCommand(sql, connection);
-            command.Parameters.AddWithValue("@Id", id);
-
-            using var reader = command.ExecuteReader();
-            if (reader.Read())
+            try
             {
-                return ReadProduct(reader);
-            }
+                const string sql = "SELECT Id, Name, Price, Quantity, MinStock FROM Products WHERE Id = @Id;";
 
-            return null;
+                using var connection = CreateConnection();
+                using var command = new SqliteCommand(sql, connection);
+                command.Parameters.AddWithValue("@Id", id);
+
+                using var reader = command.ExecuteReader();
+                if (reader.Read())
+                {
+                    return ReadProduct(reader);
+                }
+
+                return null;
+            }
+            catch (Exception ex)
+            {
+                throw new RepositoryException("Product Details", $"Get Product #{id}", ex.Message, ex);
+            }
         }
 
         /// <summary>
@@ -76,26 +90,33 @@ namespace InventoryManagementSystem.Data
         {
             if (product == null) throw new ArgumentNullException(nameof(product));
 
-            const string sql = @"
-                INSERT INTO Products (Name, Price, Quantity, MinStock)
-                VALUES (@Name, @Price, @Quantity, @MinStock);
-                SELECT last_insert_rowid();";
-
-            using var connection = CreateConnection();
-            using var command = new SqliteCommand(sql, connection);
-
-            command.Parameters.AddWithValue("@Name", product.Name);
-            command.Parameters.AddWithValue("@Price", (double)product.Price);
-            command.Parameters.AddWithValue("@Quantity", product.Quantity);
-            command.Parameters.AddWithValue("@MinStock", product.MinStock);
-
-            object? result = command.ExecuteScalar();
-            if (result != null && result != DBNull.Value)
+            try
             {
-                product.Id = Convert.ToInt32(result);
-            }
+                const string sql = @"
+                    INSERT INTO Products (Name, Price, Quantity, MinStock)
+                    VALUES (@Name, @Price, @Quantity, @MinStock);
+                    SELECT last_insert_rowid();";
 
-            return product;
+                using var connection = CreateConnection();
+                using var command = new SqliteCommand(sql, connection);
+
+                command.Parameters.AddWithValue("@Name", product.Name);
+                command.Parameters.AddWithValue("@Price", (double)product.Price);
+                command.Parameters.AddWithValue("@Quantity", product.Quantity);
+                command.Parameters.AddWithValue("@MinStock", product.MinStock);
+
+                object? result = command.ExecuteScalar();
+                if (result != null && result != DBNull.Value)
+                {
+                    product.Id = Convert.ToInt32(result);
+                }
+
+                return product;
+            }
+            catch (Exception ex)
+            {
+                throw new RepositoryException("Product Creation", $"Insert Product '{product.Name}'", ex.Message, ex);
+            }
         }
 
         /// <summary>
@@ -105,25 +126,32 @@ namespace InventoryManagementSystem.Data
         {
             if (product == null) throw new ArgumentNullException(nameof(product));
 
-            const string sql = @"
-                UPDATE Products
-                SET Name = @Name,
-                    Price = @Price,
-                    Quantity = @Quantity,
-                    MinStock = @MinStock
-                WHERE Id = @Id;";
+            try
+            {
+                const string sql = @"
+                    UPDATE Products
+                    SET Name = @Name,
+                        Price = @Price,
+                        Quantity = @Quantity,
+                        MinStock = @MinStock
+                    WHERE Id = @Id;";
 
-            using var connection = CreateConnection();
-            using var command = new SqliteCommand(sql, connection);
+                using var connection = CreateConnection();
+                using var command = new SqliteCommand(sql, connection);
 
-            command.Parameters.AddWithValue("@Id", product.Id);
-            command.Parameters.AddWithValue("@Name", product.Name);
-            command.Parameters.AddWithValue("@Price", (double)product.Price);
-            command.Parameters.AddWithValue("@Quantity", product.Quantity);
-            command.Parameters.AddWithValue("@MinStock", product.MinStock);
+                command.Parameters.AddWithValue("@Id", product.Id);
+                command.Parameters.AddWithValue("@Name", product.Name);
+                command.Parameters.AddWithValue("@Price", (double)product.Price);
+                command.Parameters.AddWithValue("@Quantity", product.Quantity);
+                command.Parameters.AddWithValue("@MinStock", product.MinStock);
 
-            int rowsAffected = command.ExecuteNonQuery();
-            return rowsAffected > 0;
+                int rowsAffected = command.ExecuteNonQuery();
+                return rowsAffected > 0;
+            }
+            catch (Exception ex)
+            {
+                throw new RepositoryException("Product Editing", $"Update Product #{product.Id}", ex.Message, ex);
+            }
         }
 
         /// <summary>
@@ -131,14 +159,21 @@ namespace InventoryManagementSystem.Data
         /// </summary>
         public bool Delete(int id)
         {
-            const string sql = "DELETE FROM Products WHERE Id = @Id;";
+            try
+            {
+                const string sql = "DELETE FROM Products WHERE Id = @Id;";
 
-            using var connection = CreateConnection();
-            using var command = new SqliteCommand(sql, connection);
-            command.Parameters.AddWithValue("@Id", id);
+                using var connection = CreateConnection();
+                using var command = new SqliteCommand(sql, connection);
+                command.Parameters.AddWithValue("@Id", id);
 
-            int rowsAffected = command.ExecuteNonQuery();
-            return rowsAffected > 0;
+                int rowsAffected = command.ExecuteNonQuery();
+                return rowsAffected > 0;
+            }
+            catch (Exception ex)
+            {
+                throw new RepositoryException("Product Deletion", $"Delete Product #{id}", ex.Message, ex);
+            }
         }
 
         /// <summary>
@@ -151,24 +186,31 @@ namespace InventoryManagementSystem.Data
                 return GetAll();
             }
 
-            var list = new List<Product>();
-            const string sql = @"
-                SELECT Id, Name, Price, Quantity, MinStock
-                FROM Products
-                WHERE Name LIKE @Query OR CAST(Id AS TEXT) LIKE @Query
-                ORDER BY Id ASC;";
-
-            using var connection = CreateConnection();
-            using var command = new SqliteCommand(sql, connection);
-            command.Parameters.AddWithValue("@Query", $"%{query.Trim()}%");
-
-            using var reader = command.ExecuteReader();
-            while (reader.Read())
+            try
             {
-                list.Add(ReadProduct(reader));
-            }
+                var list = new List<Product>();
+                const string sql = @"
+                    SELECT Id, Name, Price, Quantity, MinStock
+                    FROM Products
+                    WHERE Name LIKE @Query OR CAST(Id AS TEXT) LIKE @Query
+                    ORDER BY Id ASC;";
 
-            return list;
+                using var connection = CreateConnection();
+                using var command = new SqliteCommand(sql, connection);
+                command.Parameters.AddWithValue("@Query", $"%{query.Trim()}%");
+
+                using var reader = command.ExecuteReader();
+                while (reader.Read())
+                {
+                    list.Add(ReadProduct(reader));
+                }
+
+                return list;
+            }
+            catch (Exception ex)
+            {
+                throw new RepositoryException("Inventory Search", $"Search with query '{query}'", ex.Message, ex);
+            }
         }
 
         /// <summary>
@@ -176,26 +218,33 @@ namespace InventoryManagementSystem.Data
         /// </summary>
         public (int Total, int LowStock, int OutOfStock) GetDashboardStatistics()
         {
-            const string sql = @"
-                SELECT 
-                    COUNT(*) AS Total,
-                    TOTAL(CASE WHEN Quantity > 0 AND Quantity <= MinStock THEN 1 ELSE 0 END) AS LowStock,
-                    TOTAL(CASE WHEN Quantity = 0 THEN 1 ELSE 0 END) AS OutOfStock
-                FROM Products;";
-
-            using var connection = CreateConnection();
-            using var command = new SqliteCommand(sql, connection);
-            using var reader = command.ExecuteReader();
-
-            if (reader.Read())
+            try
             {
-                int total = Convert.ToInt32(reader["Total"]);
-                int lowStock = Convert.ToInt32(reader["LowStock"]);
-                int outOfStock = Convert.ToInt32(reader["OutOfStock"]);
-                return (total, lowStock, outOfStock);
-            }
+                const string sql = @"
+                    SELECT 
+                        COUNT(*) AS Total,
+                        TOTAL(CASE WHEN Quantity > 0 AND Quantity <= MinStock THEN 1 ELSE 0 END) AS LowStock,
+                        TOTAL(CASE WHEN Quantity = 0 THEN 1 ELSE 0 END) AS OutOfStock
+                    FROM Products;";
 
-            return (0, 0, 0);
+                using var connection = CreateConnection();
+                using var command = new SqliteCommand(sql, connection);
+                using var reader = command.ExecuteReader();
+
+                if (reader.Read())
+                {
+                    int total = Convert.ToInt32(reader["Total"]);
+                    int lowStock = Convert.ToInt32(reader["LowStock"]);
+                    int outOfStock = Convert.ToInt32(reader["OutOfStock"]);
+                    return (total, lowStock, outOfStock);
+                }
+
+                return (0, 0, 0);
+            }
+            catch (Exception ex)
+            {
+                throw new RepositoryException("Dashboard Analytics", "Calculate KPI Statistics", ex.Message, ex);
+            }
         }
 
         private static Product ReadProduct(SqliteDataReader reader)

@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Windows.Forms;
 using InventoryManagementSystem.Models;
 using InventoryManagementSystem.UI;
+using InventoryManagementSystem.Validation;
 
 namespace InventoryManagementSystem.Forms
 {
@@ -24,6 +26,13 @@ namespace InventoryManagementSystem.Forms
         private TextBox _txtPrice = null!;
         private TextBox _txtQuantity = null!;
         private TextBox _txtMinStock = null!;
+
+        private Panel _nameContainer = null!;
+        private Panel _priceContainer = null!;
+        private Panel _qtyContainer = null!;
+        private Panel _minStockContainer = null!;
+        private readonly HashSet<Panel> _invalidContainers = new HashSet<Panel>();
+
         private Label _lblValidationMessage = null!;
         private ModernButton _btnSave = null!;
         private ModernButton _btnCancel = null!;
@@ -113,6 +122,7 @@ namespace InventoryManagementSystem.Forms
             Label lblName = CreateFieldLabel("Product Name *", 20, topOffset);
             topOffset += 24;
             var (nameContainer, txtName) = CreateInputBox(20, topOffset, labelWidth, inputHeight);
+            _nameContainer = nameContainer;
             _txtName = txtName;
             formCard.Controls.Add(lblName);
             formCard.Controls.Add(nameContainer);
@@ -122,6 +132,7 @@ namespace InventoryManagementSystem.Forms
             Label lblPrice = CreateFieldLabel("Price ($) *", 20, topOffset);
             topOffset += 24;
             var (priceContainer, txtPrice) = CreateInputBox(20, topOffset, labelWidth, inputHeight);
+            _priceContainer = priceContainer;
             _txtPrice = txtPrice;
             formCard.Controls.Add(lblPrice);
             formCard.Controls.Add(priceContainer);
@@ -131,6 +142,7 @@ namespace InventoryManagementSystem.Forms
             Label lblQuantity = CreateFieldLabel("Initial Stock Quantity *", 20, topOffset);
             topOffset += 24;
             var (qtyContainer, txtQuantity) = CreateInputBox(20, topOffset, labelWidth, inputHeight);
+            _qtyContainer = qtyContainer;
             _txtQuantity = txtQuantity;
             formCard.Controls.Add(lblQuantity);
             formCard.Controls.Add(qtyContainer);
@@ -140,6 +152,7 @@ namespace InventoryManagementSystem.Forms
             Label lblMinStock = CreateFieldLabel("Minimum Stock Threshold *", 20, topOffset);
             topOffset += 24;
             var (minStockContainer, txtMinStock) = CreateInputBox(20, topOffset, labelWidth, inputHeight);
+            _minStockContainer = minStockContainer;
             _txtMinStock = txtMinStock;
             formCard.Controls.Add(lblMinStock);
             formCard.Controls.Add(minStockContainer);
@@ -234,13 +247,30 @@ namespace InventoryManagementSystem.Forms
                 Dock = DockStyle.Fill
             };
 
+            // Custom border rendering with error state indication (Red when invalid)
             container.Paint += (s, e) =>
             {
                 e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                using Pen pen = new Pen(textBox.Focused ? DesignSystem.PrimaryBlue : DesignSystem.BorderColor, 1.5f);
+                bool hasError = _invalidContainers.Contains(container);
+                Color borderClr = hasError
+                    ? DesignSystem.ErrorColor
+                    : (textBox.Focused ? DesignSystem.PrimaryBlue : DesignSystem.BorderColor);
+                float penWidth = hasError ? 2.0f : 1.5f;
+
+                using Pen pen = new Pen(borderClr, penWidth);
                 Rectangle rect = new Rectangle(0, 0, container.Width - 1, container.Height - 1);
                 using GraphicsPath path = DesignSystem.CreateRoundedRectanglePath(rect, 6);
                 e.Graphics.DrawPath(pen, path);
+            };
+
+            // Real-time error clearing as user types
+            textBox.TextChanged += (s, e) =>
+            {
+                if (_invalidContainers.Remove(container))
+                {
+                    container.Invalidate();
+                    _lblValidationMessage.Visible = false;
+                }
             };
 
             textBox.Enter += (s, e) => container.Invalidate();
@@ -259,88 +289,75 @@ namespace InventoryManagementSystem.Forms
         }
 
         /// <summary>
-        /// Handles Save Click event: Validates inputs according to business rules.
+        /// Handles Save Click event: Validates inputs using centralized ProductValidator.
+        /// Displays feature-tagged error messages both inline and via modal warning dialogs.
         /// Demonstrates Windows Programming Course Topic 1 (Events & Messages).
         /// </summary>
         private void OnSaveClicked(object? sender, EventArgs e)
         {
-            string name = _txtName.Text.Trim();
-            string priceText = _txtPrice.Text.Trim();
-            string qtyText = _txtQuantity.Text.Trim();
-            string minStockText = _txtMinStock.Text.Trim();
+            string feature = IsEditMode ? "Product Editing" : "Product Creation";
 
-            // 1. Validation: Product name cannot be empty
-            if (string.IsNullOrWhiteSpace(name))
+            _invalidContainers.Clear();
+
+            var valResult = ProductValidator.ValidateCreation(
+                _txtName.Text,
+                _txtPrice.Text,
+                _txtQuantity.Text,
+                _txtMinStock.Text,
+                out decimal price,
+                out int quantity,
+                out int minStock,
+                feature
+            );
+
+            if (!valResult.IsValid)
             {
-                ShowValidationError("Product name cannot be empty.", _txtName);
+                Panel targetContainer = valResult.FieldName switch
+                {
+                    "Product Name" => _nameContainer,
+                    "Price" => _priceContainer,
+                    "Stock Quantity" => _qtyContainer,
+                    "Minimum Stock" => _minStockContainer,
+                    _ => _nameContainer
+                };
+
+                TextBox targetBox = valResult.FieldName switch
+                {
+                    "Product Name" => _txtName,
+                    "Price" => _txtPrice,
+                    "Stock Quantity" => _txtQuantity,
+                    "Minimum Stock" => _txtMinStock,
+                    _ => _txtName
+                };
+
+                _invalidContainers.Add(targetContainer);
+                targetContainer.Invalidate();
+
+                _lblValidationMessage.Text = valResult.ToInlineMessage();
+                _lblValidationMessage.Visible = true;
+
+                targetBox.Focus();
+                targetBox.SelectAll();
+
+                // Feature-related modern modal dialog
+                NotificationDialog.ShowWarning(
+                    this,
+                    $"[{valResult.Feature} — Validation Error]",
+                    valResult.ToDialogMessage()
+                );
                 return;
             }
 
-            // 2. Validation: Price must be valid numeric value >= 0
-            if (!decimal.TryParse(priceText, NumberStyles.Number | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal price) &&
-                !decimal.TryParse(priceText, out price))
-            {
-                ShowValidationError("Price must be a valid numeric value.", _txtPrice);
-                return;
-            }
-
-            if (price < 0)
-            {
-                ShowValidationError("Price cannot be negative.", _txtPrice);
-                return;
-            }
-
-            // 3. Validation: Quantity must be valid integer >= 0
-            if (!int.TryParse(qtyText, out int quantity))
-            {
-                ShowValidationError("Quantity must be a valid integer.", _txtQuantity);
-                return;
-            }
-
-            if (quantity < 0)
-            {
-                ShowValidationError("Quantity cannot be negative.", _txtQuantity);
-                return;
-            }
-
-            // 4. Validation: MinStock must be valid integer >= 0
-            if (!int.TryParse(minStockText, out int minStock))
-            {
-                ShowValidationError("Minimum Stock must be a valid integer.", _txtMinStock);
-                return;
-            }
-
-            if (minStock < 0)
-            {
-                ShowValidationError("Minimum Stock cannot be negative.", _txtMinStock);
-                return;
-            }
-
-            // Validation passed
+            // All validations passed
             _lblValidationMessage.Visible = false;
 
-            CurrentProduct.Name = name;
+            CurrentProduct.Name = _txtName.Text.Trim();
             CurrentProduct.Price = price;
             CurrentProduct.Quantity = quantity;
             CurrentProduct.MinStock = minStock;
 
             DialogResult = DialogResult.OK;
             Close();
-        }
-
-        private void ShowValidationError(string message, TextBox targetBox)
-        {
-            _lblValidationMessage.Text = "⚠ " + message;
-            _lblValidationMessage.Visible = true;
-            targetBox.Focus();
-            targetBox.SelectAll();
-
-            // Modern pro warning dialog
-            NotificationDialog.ShowWarning(
-                this,
-                "Validation Error",
-                message
-            );
         }
     }
 }

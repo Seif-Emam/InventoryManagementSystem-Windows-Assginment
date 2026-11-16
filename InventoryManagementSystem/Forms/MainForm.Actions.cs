@@ -19,10 +19,9 @@ namespace InventoryManagementSystem.Forms
             using ProductForm form = new ProductForm();
             if (form.ShowDialog(this) == DialogResult.OK)
             {
+                Product newProduct = form.CurrentProduct;
                 try
                 {
-                    Product newProduct = form.CurrentProduct;
-
                     // Insert into SQLite database; repository assigns generated Id
                     _repository.Add(newProduct);
 
@@ -40,8 +39,8 @@ namespace InventoryManagementSystem.Forms
                 {
                     NotificationDialog.ShowError(
                         this,
-                        "Database Error",
-                        $"Failed to save product to SQLite database:\n\n{ex.Message}"
+                        "[Product Creation Error]",
+                        $"Failed to save product '{newProduct.Name}' to SQLite database:\n\n{ex.Message}"
                     );
                 }
             }
@@ -57,7 +56,7 @@ namespace InventoryManagementSystem.Forms
             {
                 NotificationDialog.ShowWarning(
                     this,
-                    "No Product Selected",
+                    "[Product Editing Selection]",
                     "Please select a product from the table to edit, or click '✏ Edit' directly in any product row."
                 );
                 return;
@@ -96,8 +95,8 @@ namespace InventoryManagementSystem.Forms
                 {
                     NotificationDialog.ShowError(
                         this,
-                        "Database Error",
-                        $"Failed to update product in SQLite database:\n\n{ex.Message}"
+                        "[Product Editing Error]",
+                        $"Failed to update product #{form.CurrentProduct.Id} ('{form.CurrentProduct.Name}') in SQLite database:\n\n{ex.Message}"
                     );
                 }
             }
@@ -113,7 +112,7 @@ namespace InventoryManagementSystem.Forms
             {
                 NotificationDialog.ShowWarning(
                     this,
-                    "No Product Selected",
+                    "[Product Deletion Selection]",
                     "Please select a product from the table to delete."
                 );
                 return;
@@ -148,8 +147,8 @@ namespace InventoryManagementSystem.Forms
                 {
                     NotificationDialog.ShowError(
                         this,
-                        "Database Error",
-                        $"Failed to delete product from SQLite database:\n\n{ex.Message}"
+                        "[Product Deletion Error]",
+                        $"Failed to delete product #{selected.Id} ('{selected.Name}') from SQLite database:\n\n{ex.Message}"
                     );
                 }
             }
@@ -213,7 +212,7 @@ namespace InventoryManagementSystem.Forms
             }
             catch (Exception ex)
             {
-                NotificationDialog.ShowError(this, "Filter Error", $"Failed to filter products:\n\n{ex.Message}");
+                NotificationDialog.ShowError(this, "[Inventory Filter Error]", $"Failed to filter products by Low Stock status:\n\n{ex.Message}");
             }
         }
 
@@ -234,7 +233,7 @@ namespace InventoryManagementSystem.Forms
             }
             catch (Exception ex)
             {
-                NotificationDialog.ShowError(this, "Filter Error", $"Failed to filter products:\n\n{ex.Message}");
+                NotificationDialog.ShowError(this, "[Inventory Filter Error]", $"Failed to filter products by Out of Stock status:\n\n{ex.Message}");
             }
         }
 

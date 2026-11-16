@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -10,6 +10,17 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Forms\MainForm.*.cs">
+      <DependentUpon>MainForm.cs</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
+    <Compile Update="Forms\CommandsExplorerForm.*.cs">
+      <DependentUpon>CommandsExplorerForm.cs</DependentUpon>
+      <SubType>Code</SubType>
+    </Compile>
   </ItemGroup>
 
 </Project>

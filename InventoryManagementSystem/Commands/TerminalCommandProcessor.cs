@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text;
 using InventoryManagementSystem.Data;
 using InventoryManagementSystem.Models;
+using InventoryManagementSystem.Validation;
 
 namespace InventoryManagementSystem.Commands
 {
@@ -118,7 +119,7 @@ namespace InventoryManagementSystem.Commands
                     if (decimal.TryParse(p, NumberStyles.Any, CultureInfo.InvariantCulture, out var parsedPrice))
                         price = parsedPrice;
                     else
-                        return TerminalOutput.Error($"Invalid price value '{p}'. Must be a valid numeric value.");
+                        return TerminalOutput.Error(ValidationResult.Failure("Product Creation", "Price", p, "Price must be a valid numeric dollar amount.", "Example: add --name \"Item\" --price 29.99 --stock 10").ToTerminalErrorString());
                 }
                 if (namedArgs.TryGetValue("stock", out var s) || namedArgs.TryGetValue("s", out s) ||
                     namedArgs.TryGetValue("qty", out s) || namedArgs.TryGetValue("quantity", out s) || namedArgs.TryGetValue("q", out s))
@@ -126,7 +127,7 @@ namespace InventoryManagementSystem.Commands
                     if (int.TryParse(s, out var parsedStock))
                         stock = parsedStock;
                     else
-                        return TerminalOutput.Error($"Invalid stock quantity '{s}'. Must be a whole integer.");
+                        return TerminalOutput.Error(ValidationResult.Failure("Product Creation", "Stock Quantity", s, "Stock quantity must be a whole non-negative integer.", "Example: --stock 20").ToTerminalErrorString());
                 }
                 if (namedArgs.TryGetValue("min", out var m) || namedArgs.TryGetValue("m", out m) ||
                     namedArgs.TryGetValue("minstock", out m) || namedArgs.TryGetValue("min-stock", out m))
@@ -134,14 +135,14 @@ namespace InventoryManagementSystem.Commands
                     if (int.TryParse(m, out var parsedMin))
                         minStock = parsedMin;
                     else
-                        return TerminalOutput.Error($"Invalid minimum stock '{m}'. Must be a whole integer.");
+                        return TerminalOutput.Error(ValidationResult.Failure("Product Creation", "Minimum Stock", m, "Minimum stock threshold must be a whole non-negative integer.", "Example: --min 5").ToTerminalErrorString());
                 }
             }
 
             // Fallback to positional arguments ONLY IF no flags were provided
             if (namedArgs.Count == 0)
             {
-                var positionals = tokens.Skip(1).Where(t => !t.StartsWith("-") && !t.Contains("=")).ToList();
+                var positionals = tokens.Skip(1).Where(t => !IsFlag(t)).ToList();
 
                 if (string.IsNullOrEmpty(name) && positionals.Count >= 1)
                     name = positionals[0];
@@ -151,7 +152,7 @@ namespace InventoryManagementSystem.Commands
                     if (decimal.TryParse(positionals[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var p))
                         price = p;
                     else
-                        return TerminalOutput.Error($"Invalid price value '{positionals[1]}'. Must be a valid numeric value.");
+                        return TerminalOutput.Error(ValidationResult.Failure("Product Creation", "Price", positionals[1], "Price must be a valid numeric dollar amount.", "Example: add \"Mouse\" 29.99 15 5").ToTerminalErrorString());
                 }
 
                 if (!stock.HasValue && positionals.Count >= 3)
@@ -159,7 +160,7 @@ namespace InventoryManagementSystem.Commands
                     if (int.TryParse(positionals[2], out var s))
                         stock = s;
                     else
-                        return TerminalOutput.Error($"Invalid stock value '{positionals[2]}'. Must be a whole integer.");
+                        return TerminalOutput.Error(ValidationResult.Failure("Product Creation", "Stock Quantity", positionals[2], "Stock quantity must be a whole non-negative integer.", "Example: add \"Mouse\" 29.99 15 5").ToTerminalErrorString());
                 }
 
                 if (!minStock.HasValue && positionals.Count >= 4)
@@ -167,50 +168,24 @@ namespace InventoryManagementSystem.Commands
                     if (int.TryParse(positionals[3], out var m))
                         minStock = m;
                     else
-                        return TerminalOutput.Error($"Invalid minimum stock '{positionals[3]}'. Must be a whole integer.");
+                        return TerminalOutput.Error(ValidationResult.Failure("Product Creation", "Minimum Stock", positionals[3], "Minimum stock threshold must be a whole non-negative integer.", "Example: add \"Mouse\" 29.99 15 5").ToTerminalErrorString());
                 }
             }
 
-            // Defaults / Validation
-            if (string.IsNullOrWhiteSpace(name))
+            // Comprehensive Domain Validation via ProductValidator
+            var valResult = ProductValidator.ValidateCreationValues(name, price, stock, minStock ?? 5, "Product Creation");
+            if (!valResult.IsValid)
             {
-                return TerminalOutput.Error("Product name is required.\nUsage: add --name <name> --price <price> --stock <qty> [--min <min_stock>]\n   Or: add \"Product Name\" 49.99 20 5");
-            }
-
-            if (!price.HasValue)
-            {
-                return TerminalOutput.Error("Product price is required.\nUsage: add --name <name> --price <price> --stock <qty> [--min <min_stock>]");
-            }
-
-            if (price.Value < 0)
-            {
-                return TerminalOutput.Error("Product price cannot be negative.");
-            }
-
-            if (!stock.HasValue)
-            {
-                return TerminalOutput.Error("Product stock quantity is required.\nUsage: add --name <name> --price <price> --stock <qty> [--min <min_stock>]");
-            }
-
-            if (stock.Value < 0)
-            {
-                return TerminalOutput.Error("Product stock quantity cannot be negative.");
-            }
-
-            minStock ??= 5; // Default minimum stock if omitted
-
-            if (minStock.Value < 0)
-            {
-                return TerminalOutput.Error("Minimum stock threshold cannot be negative.");
+                return TerminalOutput.Error(valResult.ToTerminalErrorString());
             }
 
             // Insert into SQLite database directly
-            var product = new Product(0, name.Trim(), price.Value, stock.Value, minStock.Value);
+            var product = new Product(0, name!.Trim(), price!.Value, stock!.Value, minStock ?? 5);
             _repository.Add(product);
             _onDataModified?.Invoke();
 
             var sb = new StringBuilder();
-            sb.AppendLine($"✔ [SUCCESS] Product #{product.Id} added to SQLite successfully!");
+            sb.AppendLine($"✔ [PRODUCT CREATION SUCCESS] Product #{product.Id} added to SQLite successfully!");
             sb.AppendLine($"  Name:     {product.Name}");
             sb.AppendLine($"  Price:    ${product.Price:F2}");
             sb.AppendLine($"  Quantity: {product.Quantity} units");
@@ -230,7 +205,13 @@ namespace InventoryManagementSystem.Commands
         {
             if (tokens.Count < 2)
             {
-                return TerminalOutput.Error("Product ID is required for editing.\nUsage: edit <id> [--name <name>] [--price <price>] [--stock <qty>] [--min <min_stock>]\n   Or: edit <id> \"New Name\" 39.99 15 5");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Editing",
+                    "Product ID",
+                    null,
+                    "Product ID is required for editing.",
+                    "Usage: edit <id> [--name <name>] [--price <price>] [--stock <qty>] [--min <min_stock>]\n   Or: edit <id> \"New Name\" 39.99 15 5"
+                ).ToTerminalErrorString());
             }
 
             int? targetId = null;
@@ -260,14 +241,37 @@ namespace InventoryManagementSystem.Commands
 
             if (!targetId.HasValue)
             {
-                return TerminalOutput.Error($"Invalid or missing product ID '{tokens[1]}'. Must be a numeric product ID.");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Editing",
+                    "Product ID",
+                    tokens[1],
+                    "Invalid product ID. Must be a numeric integer value.",
+                    "Example: edit 3 --price 29.99"
+                ).ToTerminalErrorString());
+            }
+
+            if (targetId.Value <= 0)
+            {
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Editing",
+                    "Product ID",
+                    targetId.Value.ToString(),
+                    "Product ID must be a positive integer greater than zero.",
+                    "Example: edit 3 --price 29.99"
+                ).ToTerminalErrorString());
             }
 
             // Fetch existing record
             var product = _repository.GetById(targetId.Value);
             if (product == null)
             {
-                return TerminalOutput.Error($"Product with ID #{targetId.Value} does not exist in the database.");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Editing",
+                    "Product ID",
+                    targetId.Value.ToString(),
+                    $"Product with ID #{targetId.Value} does not exist in the database.",
+                    "Run 'list' or 'search <name>' to find existing product IDs."
+                ).ToTerminalErrorString());
             }
 
             // Read named updates
@@ -278,7 +282,7 @@ namespace InventoryManagementSystem.Commands
                 if (decimal.TryParse(p, NumberStyles.Any, CultureInfo.InvariantCulture, out var pr))
                     newPrice = pr;
                 else
-                    return TerminalOutput.Error($"Invalid price value '{p}'. Must be a valid numeric value.");
+                    return TerminalOutput.Error(ValidationResult.Failure("Product Editing", "Price", p, "Price must be a valid numeric dollar value.", "Example: --price 29.99").ToTerminalErrorString());
             }
             if (namedArgs.TryGetValue("stock", out var s) || namedArgs.TryGetValue("s", out s) ||
                 namedArgs.TryGetValue("qty", out s) || namedArgs.TryGetValue("quantity", out s) || namedArgs.TryGetValue("q", out s))
@@ -286,7 +290,7 @@ namespace InventoryManagementSystem.Commands
                 if (int.TryParse(s, out var st))
                     newStock = st;
                 else
-                    return TerminalOutput.Error($"Invalid stock quantity '{s}'. Must be a whole integer.");
+                    return TerminalOutput.Error(ValidationResult.Failure("Product Editing", "Stock Quantity", s, "Stock quantity must be a whole non-negative integer.", "Example: --stock 15").ToTerminalErrorString());
             }
             if (namedArgs.TryGetValue("min", out var m) || namedArgs.TryGetValue("m", out m) ||
                 namedArgs.TryGetValue("minstock", out m) || namedArgs.TryGetValue("min-stock", out m))
@@ -294,63 +298,79 @@ namespace InventoryManagementSystem.Commands
                 if (int.TryParse(m, out var mn))
                     newMin = mn;
                 else
-                    return TerminalOutput.Error($"Invalid minimum stock '{m}'. Must be a whole integer.");
+                    return TerminalOutput.Error(ValidationResult.Failure("Product Editing", "Minimum Stock", m, "Minimum stock threshold must be a whole non-negative integer.", "Example: --min 4").ToTerminalErrorString());
             }
 
             // Read positional updates ONLY IF no flags were used
             if (namedArgs.Count == 0)
             {
-                var positionals = remainingTokens.Where(t => !t.StartsWith("-") && !t.Contains("=")).ToList();
-                if (string.IsNullOrEmpty(newName) && positionals.Count >= 1)
-                    newName = positionals[0];
-                if (!newPrice.HasValue && positionals.Count >= 2)
+                var positionals = remainingTokens.Where(t => !IsFlag(t)).ToList();
+
+                // If a single numeric argument was supplied (e.g. edit 1 -39.99 or edit 1 49.99), interpret directly as price update
+                if (positionals.Count == 1 && decimal.TryParse(positionals[0], NumberStyles.Any, CultureInfo.InvariantCulture, out var singleNum))
                 {
-                    if (decimal.TryParse(positionals[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var pr))
-                        newPrice = pr;
-                    else
-                        return TerminalOutput.Error($"Invalid price value '{positionals[1]}'. Must be a valid numeric value.");
+                    newPrice = singleNum;
                 }
-                if (!newStock.HasValue && positionals.Count >= 3)
+                else
                 {
-                    if (int.TryParse(positionals[2], out var st))
-                        newStock = st;
-                    else
-                        return TerminalOutput.Error($"Invalid stock value '{positionals[2]}'. Must be a whole integer.");
-                }
-                if (!newMin.HasValue && positionals.Count >= 4)
-                {
-                    if (int.TryParse(positionals[3], out var mn))
-                        newMin = mn;
-                    else
-                        return TerminalOutput.Error($"Invalid minimum stock '{positionals[3]}'. Must be a whole integer.");
+                    if (string.IsNullOrEmpty(newName) && positionals.Count >= 1)
+                        newName = positionals[0];
+                    if (!newPrice.HasValue && positionals.Count >= 2)
+                    {
+                        if (decimal.TryParse(positionals[1], NumberStyles.Any, CultureInfo.InvariantCulture, out var pr))
+                            newPrice = pr;
+                        else
+                            return TerminalOutput.Error(ValidationResult.Failure("Product Editing", "Price", positionals[1], "Price must be a valid numeric dollar value.").ToTerminalErrorString());
+                    }
+                    if (!newStock.HasValue && positionals.Count >= 3)
+                    {
+                        if (int.TryParse(positionals[2], out var st))
+                            newStock = st;
+                        else
+                            return TerminalOutput.Error(ValidationResult.Failure("Product Editing", "Stock Quantity", positionals[2], "Stock quantity must be a whole non-negative integer.").ToTerminalErrorString());
+                    }
+                    if (!newMin.HasValue && positionals.Count >= 4)
+                    {
+                        if (int.TryParse(positionals[3], out var mn))
+                            newMin = mn;
+                        else
+                            return TerminalOutput.Error(ValidationResult.Failure("Product Editing", "Minimum Stock", positionals[3], "Minimum stock threshold must be a whole non-negative integer.").ToTerminalErrorString());
+                    }
                 }
             }
 
             // Ensure at least one field is being modified
             if (string.IsNullOrWhiteSpace(newName) && !newPrice.HasValue && !newStock.HasValue && !newMin.HasValue)
             {
-                return TerminalOutput.Warning($"No changes specified for Product #{targetId.Value} ('{product.Name}').\nProvide at least one property to update:\n  edit {targetId.Value} --price <new_price>\n  edit {targetId.Value} --stock <new_stock>");
+                return TerminalOutput.Warning($"⚠ [PRODUCT EDITING WARNING] No changes specified for Product #{targetId.Value} ('{product.Name}').\n  Provide at least one property to update:\n    edit {targetId.Value} --price <new_price>\n    edit {targetId.Value} --stock <new_stock>");
             }
 
-            // Apply updates
+            // Validate fields being changed using ProductValidator
             if (!string.IsNullOrWhiteSpace(newName))
+            {
+                var nameRes = ProductValidator.ValidateName(newName, "Product Editing");
+                if (!nameRes.IsValid) return TerminalOutput.Error(nameRes.ToTerminalErrorString());
                 product.Name = newName.Trim();
+            }
 
             if (newPrice.HasValue)
             {
-                if (newPrice.Value < 0) return TerminalOutput.Error("Price cannot be negative.");
+                var priceRes = ProductValidator.ValidatePriceValue(newPrice.Value, "Product Editing");
+                if (!priceRes.IsValid) return TerminalOutput.Error(priceRes.ToTerminalErrorString());
                 product.Price = newPrice.Value;
             }
 
             if (newStock.HasValue)
             {
-                if (newStock.Value < 0) return TerminalOutput.Error("Stock quantity cannot be negative.");
+                var stockRes = ProductValidator.ValidateQuantityValue(newStock.Value, "Product Editing");
+                if (!stockRes.IsValid) return TerminalOutput.Error(stockRes.ToTerminalErrorString());
                 product.Quantity = newStock.Value;
             }
 
             if (newMin.HasValue)
             {
-                if (newMin.Value < 0) return TerminalOutput.Error("Minimum stock cannot be negative.");
+                var minRes = ProductValidator.ValidateMinStockValue(newMin.Value, "Product Editing");
+                if (!minRes.IsValid) return TerminalOutput.Error(minRes.ToTerminalErrorString());
                 product.MinStock = newMin.Value;
             }
 
@@ -359,7 +379,7 @@ namespace InventoryManagementSystem.Commands
             _onDataModified?.Invoke();
 
             var sb = new StringBuilder();
-            sb.AppendLine($"✔ [SUCCESS] Product #{product.Id} updated successfully!");
+            sb.AppendLine($"✔ [PRODUCT EDITING SUCCESS] Product #{product.Id} updated successfully!");
             sb.AppendLine($"  Name:     {product.Name}");
             sb.AppendLine($"  Price:    ${product.Price:F2}");
             sb.AppendLine($"  Quantity: {product.Quantity} units");
@@ -377,7 +397,13 @@ namespace InventoryManagementSystem.Commands
         {
             if (tokens.Count < 2)
             {
-                return TerminalOutput.Error("Product ID is required for deletion.\nUsage: delete <id>   (e.g. delete 5)");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Deletion",
+                    "Product ID",
+                    null,
+                    "Product ID is required for deletion.",
+                    "Usage: delete <id>   (e.g. delete 5)"
+                ).ToTerminalErrorString());
             }
 
             int? targetId = null;
@@ -397,24 +423,47 @@ namespace InventoryManagementSystem.Commands
 
             if (!targetId.HasValue)
             {
-                return TerminalOutput.Error($"Invalid product ID '{tokens[1]}'. Must be a numeric ID.");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Deletion",
+                    "Product ID",
+                    tokens[1],
+                    "Invalid product ID. Must be a numeric integer value.",
+                    "Example: delete 5"
+                ).ToTerminalErrorString());
+            }
+
+            if (targetId.Value <= 0)
+            {
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Deletion",
+                    "Product ID",
+                    targetId.Value.ToString(),
+                    "Product ID must be a positive integer greater than zero.",
+                    "Example: delete 5"
+                ).ToTerminalErrorString());
             }
 
             var existing = _repository.GetById(targetId.Value);
             if (existing == null)
             {
-                return TerminalOutput.Error($"Product with ID #{targetId.Value} does not exist in the database.");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Deletion",
+                    "Product ID",
+                    targetId.Value.ToString(),
+                    $"Product with ID #{targetId.Value} does not exist in the database.",
+                    "Run 'list' to verify available product IDs."
+                ).ToTerminalErrorString());
             }
 
             bool deleted = _repository.Delete(targetId.Value);
             if (!deleted)
             {
-                return TerminalOutput.Error($"Failed to delete product #{targetId.Value} from database.");
+                return TerminalOutput.Error($"[Product Deletion Error] Failed to delete product #{targetId.Value} from database.");
             }
 
             _onDataModified?.Invoke();
 
-            return TerminalOutput.Ok($"✔ [SUCCESS] Product '{existing.Name}' (ID: #{existing.Id}) deleted permanently from SQLite database.");
+            return TerminalOutput.Ok($"✔ [PRODUCT DELETION SUCCESS] Product '{existing.Name}' (ID: #{existing.Id}) deleted permanently from SQLite database.");
         }
 
         // =================================================================
@@ -473,7 +522,13 @@ namespace InventoryManagementSystem.Commands
         {
             if (tokens.Count < 2)
             {
-                return TerminalOutput.Error("Search query is required.\nUsage: search <keyword or ID>   (e.g. search logitech)");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Inventory Search",
+                    "Query Keyword",
+                    null,
+                    "Search query is required.",
+                    "Usage: search <keyword or ID>   (e.g. search logitech)"
+                ).ToTerminalErrorString());
             }
 
             string query = string.Join(" ", tokens.Skip(1));
@@ -511,13 +566,36 @@ namespace InventoryManagementSystem.Commands
         {
             if (tokens.Count < 2 || !int.TryParse(tokens[1], out var id))
             {
-                return TerminalOutput.Error("Product ID is required.\nUsage: info <id>   (e.g. info 3)");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Details",
+                    "Product ID",
+                    tokens.Count > 1 ? tokens[1] : null,
+                    "Product ID is required and must be a numeric integer.",
+                    "Usage: info <id>   (e.g. info 3)"
+                ).ToTerminalErrorString());
+            }
+
+            if (id <= 0)
+            {
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Details",
+                    "Product ID",
+                    id.ToString(),
+                    "Product ID must be a positive integer greater than zero.",
+                    "Example: info 3"
+                ).ToTerminalErrorString());
             }
 
             var p = _repository.GetById(id);
             if (p == null)
             {
-                return TerminalOutput.Error($"Product with ID #{id} was not found.");
+                return TerminalOutput.Error(ValidationResult.Failure(
+                    "Product Details",
+                    "Product ID",
+                    id.ToString(),
+                    $"Product with ID #{id} was not found in the database.",
+                    "Run 'list' to browse available product IDs."
+                ).ToTerminalErrorString());
             }
 
             var sb = new StringBuilder();
@@ -614,6 +692,31 @@ namespace InventoryManagementSystem.Commands
             return tokens;
         }
 
+        /// <summary>
+        /// Determines whether a token represents a command-line flag or option key.
+        /// CRITICAL BUGFIX: Tokens like -39.99, -15, -0.5 are negative numeric values, NOT flags!
+        /// Naive t.StartsWith("-") previously caused negative prices/stock to be skipped,
+        /// causing subsequent positional values to shift and be accepted erroneously.
+        /// </summary>
+        private static bool IsFlag(string token)
+        {
+            if (string.IsNullOrWhiteSpace(token)) return false;
+
+            // Key=Value syntax (e.g. price=29.99 or --price=29.99)
+            if (token.Contains('=')) return true;
+
+            // Must begin with '-' to be considered as a flag
+            if (!token.StartsWith("-")) return false;
+
+            // If it successfully parses as a signed decimal/number, it is a numeric VALUE, NOT a flag!
+            if (decimal.TryParse(token, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
+            {
+                return false;
+            }
+
+            return true;
+        }
+
         private static Dictionary<string, string> ParseFlags(List<string> tokens)
         {
             var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -630,7 +733,7 @@ namespace InventoryManagementSystem.Commands
                         var parts = key.Split(new[] { '=' }, 2);
                         dict[parts[0]] = parts[1];
                     }
-                    else if (i + 1 < tokens.Count && !tokens[i + 1].StartsWith("-"))
+                    else if (i + 1 < tokens.Count && !IsFlag(tokens[i + 1]))
                     {
                         dict[key] = tokens[++i];
                     }
@@ -639,15 +742,15 @@ namespace InventoryManagementSystem.Commands
                         dict[key] = "true";
                     }
                 }
-                else if (token.StartsWith("-") && token.Length > 1 && !char.IsDigit(token[1]))
+                else if (token.StartsWith("-") && token.Length > 1 && !decimal.TryParse(token, NumberStyles.Any, CultureInfo.InvariantCulture, out _))
                 {
-                    string key = token.Substring(1);
+                    string key = token.TrimStart('-');
                     if (key.Contains('='))
                     {
                         var parts = key.Split(new[] { '=' }, 2);
                         dict[parts[0]] = parts[1];
                     }
-                    else if (i + 1 < tokens.Count && !tokens[i + 1].StartsWith("-"))
+                    else if (i + 1 < tokens.Count && !IsFlag(tokens[i + 1]))
                     {
                         dict[key] = tokens[++i];
                     }

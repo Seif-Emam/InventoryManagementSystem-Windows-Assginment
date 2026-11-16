@@ -1034,5 +1034,146 @@ namespace InventoryManagementSystem.Tests
             Assert.IsTrue(helpOut.Message.Contains("edit"));
             Assert.IsTrue(helpOut.Message.Contains("delete"));
         }
+
+        [TestMethod]
+        public void ProductValidator_ValidationRules_EnforceFeatureTaggedErrors()
+        {
+            // Empty name validation
+            var resNameEmpty = InventoryManagementSystem.Validation.ProductValidator.ValidateName("", "Product Creation");
+            Assert.IsFalse(resNameEmpty.IsValid);
+            Assert.AreEqual("Product Creation", resNameEmpty.Feature);
+            Assert.AreEqual("Product Name", resNameEmpty.FieldName);
+
+            // Name too long (>100 chars)
+            string longName = new string('A', 105);
+            var resNameLong = InventoryManagementSystem.Validation.ProductValidator.ValidateName(longName, "Product Creation");
+            Assert.IsFalse(resNameLong.IsValid);
+
+            // Negative price validation
+            var resPriceNeg = InventoryManagementSystem.Validation.ProductValidator.ValidatePrice("-25.50", out _, "Product Creation");
+            Assert.IsFalse(resPriceNeg.IsValid);
+            Assert.IsTrue(resPriceNeg.ErrorMessage.Contains("negative"));
+
+            // Non-numeric price
+            var resPriceInvalid = InventoryManagementSystem.Validation.ProductValidator.ValidatePrice("invalid_price", out _, "Product Creation");
+            Assert.IsFalse(resPriceInvalid.IsValid);
+
+            // Negative quantity validation
+            var resQtyNeg = InventoryManagementSystem.Validation.ProductValidator.ValidateQuantity("-10", out _, "Product Creation");
+            Assert.IsFalse(resQtyNeg.IsValid);
+            Assert.IsTrue(resQtyNeg.ErrorMessage.Contains("negative"));
+
+            // Negative minStock validation
+            var resMinNeg = InventoryManagementSystem.Validation.ProductValidator.ValidateMinStock("-5", out _, "Product Creation");
+            Assert.IsFalse(resMinNeg.IsValid);
+            Assert.IsTrue(resMinNeg.ErrorMessage.Contains("negative"));
+
+            // Valid product data passes
+            var resValid = InventoryManagementSystem.Validation.ProductValidator.ValidateCreation(
+                "Mechanical Keyboard",
+                "99.99",
+                "25",
+                "5",
+                out decimal price,
+                out int qty,
+                out int minStock,
+                "Product Creation"
+            );
+            Assert.IsTrue(resValid.IsValid);
+            Assert.AreEqual(99.99m, price);
+            Assert.AreEqual(25, qty);
+            Assert.AreEqual(5, minStock);
+        }
+
+        [TestMethod]
+        public void Terminal_Validation_DisplaysFeatureTaggedErrorMessages()
+        {
+            var repo = new ProductRepository(_testDbPath);
+            var processor = new TerminalCommandProcessor(repo);
+
+            // Add without name
+            var outMissingName = processor.Process("add");
+            Assert.IsFalse(outMissingName.Success);
+            Assert.IsTrue(outMissingName.Message.Contains("[PRODUCT CREATION ERROR]"));
+            Assert.IsTrue(outMissingName.Message.Contains("Product Name"));
+
+            // Add with negative price
+            var outNegPrice = processor.Process("add --name \"Mouse\" --price -15.99 --stock 10");
+            Assert.IsFalse(outNegPrice.Success);
+            Assert.IsTrue(outNegPrice.Message.Contains("[PRODUCT CREATION ERROR]"));
+            Assert.IsTrue(outNegPrice.Message.Contains("Price"));
+
+            // Add with invalid stock
+            var outInvalidStock = processor.Process("add --name \"Mouse\" --price 15.99 --stock not_a_number");
+            Assert.IsFalse(outInvalidStock.Success);
+            Assert.IsTrue(outInvalidStock.Message.Contains("[PRODUCT CREATION ERROR]"));
+            Assert.IsTrue(outInvalidStock.Message.Contains("Stock Quantity"));
+
+            // Edit non-existent product
+            var outEditMissing = processor.Process("edit 99999 --price 50");
+            Assert.IsFalse(outEditMissing.Success);
+            Assert.IsTrue(outEditMissing.Message.Contains("[PRODUCT EDITING ERROR]"));
+
+            // Delete non-existent product
+            var outDeleteMissing = processor.Process("delete 99999");
+            Assert.IsFalse(outDeleteMissing.Success);
+            Assert.IsTrue(outDeleteMissing.Message.Contains("[PRODUCT DELETION ERROR]"));
+        }
+
+        [TestMethod]
+        public void Terminal_PositionalAndFlag_NegativeValues_AreStrictlyRejected()
+        {
+            var repo = new ProductRepository(_testDbPath);
+            var processor = new TerminalCommandProcessor(repo);
+
+            // 1. Exact user scenario: add "Razer DeathAdder Mouse" -39.99 15 4 (Positional negative price)
+            var outNegPricePositional = processor.Process("add \"Razer DeathAdder Mouse\" -39.99 15 4");
+            Assert.IsFalse(outNegPricePositional.Success, "Adding with negative price must fail!");
+            Assert.IsTrue(outNegPricePositional.Message.Contains("[PRODUCT CREATION ERROR]"), "Output must contain error header.");
+            Assert.IsTrue(outNegPricePositional.Message.Contains("Price cannot be negative"), "Error message must state price cannot be negative.");
+            Assert.IsTrue(outNegPricePositional.Message.Contains("-39.99"), "Rejected value must be displayed.");
+
+            // Verify database does NOT contain "Razer DeathAdder Mouse"
+            var searchResults = repo.Search("Razer DeathAdder Mouse");
+            Assert.AreEqual(0, searchResults.Count, "Product with negative price must not be saved into the database.");
+
+            // 2. Positional negative stock quantity: add "Item" 49.99 -10 5
+            var outNegStockPositional = processor.Process("add \"Negative Stock Item\" 49.99 -10 5");
+            Assert.IsFalse(outNegStockPositional.Success);
+            Assert.IsTrue(outNegStockPositional.Message.Contains("[PRODUCT CREATION ERROR]"));
+            Assert.IsTrue(outNegStockPositional.Message.Contains("Stock quantity cannot be negative"));
+
+            // 3. Positional negative minimum stock threshold: add "Item" 49.99 10 -3
+            var outNegMinPositional = processor.Process("add \"Negative Min Item\" 49.99 10 -3");
+            Assert.IsFalse(outNegMinPositional.Success);
+            Assert.IsTrue(outNegMinPositional.Message.Contains("[PRODUCT CREATION ERROR]"));
+            Assert.IsTrue(outNegMinPositional.Message.Contains("Minimum stock threshold cannot be negative"));
+
+            // 4. Positional negative price in Edit command: edit 1 "Updated" -20.00 10 5
+            var existingProduct = repo.GetAll().First();
+            var outEditNegPricePositional = processor.Process($"edit {existingProduct.Id} \"{existingProduct.Name}\" -20.00 10 5");
+            Assert.IsFalse(outEditNegPricePositional.Success);
+            Assert.IsTrue(outEditNegPricePositional.Message.Contains("[PRODUCT EDITING ERROR]"));
+            Assert.IsTrue(outEditNegPricePositional.Message.Contains("Price cannot be negative"));
+
+            // 5. Direct single-numeric negative price update: edit 1 -29.99
+            var outEditSingleNeg = processor.Process($"edit {existingProduct.Id} -29.99");
+            Assert.IsFalse(outEditSingleNeg.Success);
+            Assert.IsTrue(outEditSingleNeg.Message.Contains("[PRODUCT EDITING ERROR]"));
+            Assert.IsTrue(outEditSingleNeg.Message.Contains("Price cannot be negative"));
+
+            // 6. Negative IDs in commands
+            var outNegIdEdit = processor.Process("edit -1 --price 20");
+            Assert.IsFalse(outNegIdEdit.Success);
+            Assert.IsTrue(outNegIdEdit.Message.Contains("positive integer"));
+
+            var outNegIdDelete = processor.Process("delete -5");
+            Assert.IsFalse(outNegIdDelete.Success);
+            Assert.IsTrue(outNegIdDelete.Message.Contains("positive integer"));
+
+            var outNegIdInfo = processor.Process("info -3");
+            Assert.IsFalse(outNegIdInfo.Success);
+            Assert.IsTrue(outNegIdInfo.Message.Contains("positive integer"));
+        }
     }
 }

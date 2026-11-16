@@ -493,7 +493,7 @@ namespace InventoryManagementSystem.Forms
             {
                 NotificationDialog.ShowError(
                     this,
-                    "Database Error",
+                    "[Inventory Search Error]",
                     $"Error querying products from SQLite database:\n\n{ex.Message}"
                 );
             }
